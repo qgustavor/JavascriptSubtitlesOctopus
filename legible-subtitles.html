@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer" />
+    <link rel="shortcut icon" href="./favicon.ico?v=wAOz4X2G7G">
+    <title>SubtitleOctopus - Advanced Substation Alpha Library for WebAssembly & asm.js</title>
+    <link integrity="" rel="stylesheet" href="./assets/css/bootstrap.min.css">
+    <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js" integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.3/umd/popper.min.js" integrity="sha384-ZMP7rVo3mIykV+2+9J3UJ46jBk0WLaUAdn689aCwoqbBJiSnjAK/l8WvCWPIPm49" crossorigin="anonymous"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.1.1/js/bootstrap.min.js" integrity="sha384-smHYKdLADwkXOn1EmN1qk/HfnUcbVRZyYmZ4qpPea6sjB/pTJ0euyQp0Mk8ck+5T" crossorigin="anonymous"></script>
+    <script src="./assets/js/subtitles-octopus.js"></script>
+</head>
+
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <a class="navbar-brand" href="./index.html">SubtitlesOctopus</a>
+        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#nb" aria-controls="nb" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+
+        <div class="collapse navbar-collapse" id="nb">
+            <ul class="navbar-nav mr-auto">
+                <li class="nav-item active">
+                    <a class="nav-link" href="./index.html">Home</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="https://github.com/Dador/JavascriptSubtitlesOctopus">Github</a>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <div id="content" style="padding-top: 25px;">
+      <div id="main" class="container container-body">
+        <h1>Legible subtitles example</h1>
+
+        <p>Based on the <a href="videojs.html">Video.JS example</a>. Lines aligned to the
+        bottom of the video are moved upwards to keep those legible even when the video is paused.</p>
+
+        <video id="test" class="video-js" controls preload="auto" width="840" height="460" data-setup="{}">
+            <source src="http://distribution.bbb3d.renderfarming.net/video/mp4/bbb_sunflower_1080p_30fps_normal.mp4" type='video/webm'>
+            <p class="vjs-no-js">
+                To view this video please enable JavaScript, and consider upgrading to a web browser that
+                <a href="http://videojs.com/html5-video-support/" target="_blank">supports HTML5 video</a>
+            </p>
+        </video>
+
+        <link href="https://vjs.zencdn.net/7.0.5/video-js.css" rel="stylesheet">
+        <script src="https://vjs.zencdn.net/7.0.5/video.js"></script>
+
+        <script src="https://wzrd.in/standalone/ass-parser"></script>
+        <script src="https://wzrd.in/standalone/ass-stringify"></script>
+
+        <script>
+          // Note: code style was changed to Standard because I prefer using it
+          // and it's now using newer JavaScript features to keep code simple
+          const player = videojs('#test')
+
+          player.ready(function () {
+            const video = this.tech_.el_
+
+            // As subtitles are modified on-the-fly those are loaded
+            // using fetch (it can use XHR or anything similar)
+            // then modified using ass-parser and ass-stringify.
+            window.SubtitlesOctopusOnLoad = async function () {
+              const subUrl = '/JavascriptSubtitlesOctopus/subtitles/test.ass'
+              const subtitleContent = await (await fetch(subUrl)).text()
+              const [mainSubtitle, secondarySubtitle] = splitSubtitle(subtitleContent)
+
+              const workerUrl = '/JavascriptSubtitlesOctopus/assets/js/subtitles-octopus-worker.js'
+              const fonts = [
+                '/JavascriptSubtitlesOctopus/fonts/Arial.ttf',
+                '/JavascriptSubtitlesOctopus/fonts/TimesNewRoman.ttf'
+              ]
+
+              const mainOptions = {
+                video, fonts, workerUrl,
+                subContent: mainSubtitle
+              }
+              const secondaryOptions = {
+                video, fonts, workerUrl,
+                subContent: secondarySubtitle
+              }
+
+              // The "main" instance gets an extra class so it can be
+              // styled and animated using CSS.
+              const mainInstance = new SubtitlesOctopus(mainOptions)
+              mainInstance.canvas.className += ' libassjs-canvas__main'
+
+              const secondaryInstance = new SubtitlesOctopus(secondaryOptions)
+              window.octopusInstances = [mainInstance, secondaryInstance]
+            }
+
+            if (SubtitlesOctopus) {
+              SubtitlesOctopusOnLoad()
+            }
+          })
+
+          // The split subtitle function takes a subtitle script and split it into two
+          // scripts, one with the lines below the video (which are typically the
+          // main ones) and other with the other lines.
+          function splitSubtitle (subContent) {
+            // Parse the original subtitle script
+            const parsedSub = assParser(subContent)
+
+            // Select the events section and normalize the styles
+            const eventSection = parsedSub.find(e => e.section === 'Events')
+            const styles = parsedSub
+              .find(e => e.section.includes('Styles')).body
+              .filter(e => e.key === 'Style')
+              .map(e => e.value)
+
+            // Generate the new subtitle scripts
+            const mainSubtitle = parsedSub.map(e => e === eventSection ? filterEvents(e, styles, true) : e)
+            const secondarySubtitle = parsedSub.map(e => e === eventSection ? filterEvents(e, styles, false) : e)
+
+            return [mainSubtitle, secondarySubtitle].map(e => assStringify(e))
+          }
+
+          // The filter events function filters lines from the events section
+          // based on their styling and other info
+          function filterEvents (e, styles, selectMain) {
+            const body = e.body.filter(evt => {
+              // Non-dialogue lines should always be returned
+              if (evt.key !== 'Dialogue') return true
+
+              // "Parse" the dialogue text
+              const text = evt.value.Text
+              const overwrites = (text.match(/\{[^}]+\}/g) || []).join('')
+
+              // If there's a position overwrite or an alignment overwrite
+              // filter based on the selectMain argument
+              const isAboveViaOverwrite = overwrites.match(/\\pos|\\an[4-9]/)
+              if (isAboveViaOverwrite) return !selectMain
+
+              // Select the event style and calculate the current bottom margin
+              const style = styles.find(e => e.Name === evt.value.Style)
+              const bottomMargin = Number(evt.value.MarginV) || Number(style.MarginV)
+
+              // If the line is not below then filter via selectMain
+              const isBelowViaOverwrite = overwrites.match(/\\an[123]/)
+              const isBelowViaStyle = style.Alignment.match(/[123]/)
+
+              if (!isBelowViaOverwrite && !isBelowViaStyle) {
+                return !selectMain
+              }
+
+              // If the dialogue line is below then check it using the margin
+              // The threshold might change depending on the interface size and script resolution
+              const belowMarginThreshold = 50
+              const isBelowViaMargin = bottomMargin < belowMarginThreshold
+              return isBelowViaMargin === selectMain
+            })
+
+            return { section: e.section, body }
+          }
+        </script>
+
+        <style>
+          /* Animation is CSS driven to get better performance */
+          .libassjs-canvas__main {
+            transition: transform 0.2s ease 0s;
+            transform: translateY(-30px);
+          }
+          .vjs-user-inactive.vjs-playing .libassjs-canvas__main {
+            transform: translateY(0);
+            transition-delay: 0.1s;
+          }
+          /* Make .video-js overflow hidden to avoid some issues */
+          .video-js {
+            overflow: hidden;
+          }
+        </style>
+      </div>
+    </div>
+  </body>
+</html>
